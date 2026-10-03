@@ -72,7 +72,7 @@ local function repo_url(url: String) -> String:
     return {_url}
 
 # package name from a link or bare name, - is reserved as the disabled marker
-# and ~ as the load-order separator (NNN~name).
+# and ~ as the load-order separator (NN~name).
 # part of the public api: other packages may call this to learn the folder a
 # url installs as
 function pkg_name(url: String) -> String:
@@ -100,7 +100,7 @@ local function pkg_root() -> String:
     return "%scripts_root()%/packages"
 
 # literal path of a folder inside packages/ (folder may carry a "-" or
-# "NNN~" decoration). new installs stage at pkg_dir(<bare name>)
+# "NN~" decoration). new installs stage at pkg_dir(<bare name>)
 local function pkg_dir(name: String) -> String:
     return "%pkg_root()%/%{_name}%"
 
@@ -305,13 +305,13 @@ local function requirement_missing(entry: String) -> String:
 # resolves a dependency url to the installed package recorded as coming
 # from it, since a manifest name can differ from the url-derived one. part of
 # the public api: other packages may call this to test whether a url is
-# installed (returns its bare name, or nothing)
+# installed (returns its folder name, or nothing)
 function pkg_by_origin(url: String) -> String:
     set {_url} to repo_url({_url})
     for {_folder} in pkg_list():
         set {_origin} to manifest(pkg_dir({_folder}), "origin")
         if repo_url({_origin} ? "") is {_url}:
-            return pkg_bare({_folder})
+            return {_folder}
 
 # one missing package dependency, nothing when present (enabled or disabled)
 local function pkg_dep_missing(entry: String) -> String:
@@ -382,7 +382,7 @@ local function pkg_install_dep(entry: String, depth: Integer):
 # installed disabled (-<name>). returns the final name, or nothing with the
 # failure reason readable via pkg_error(). does NOT reorder: nested dependency
 # installs would otherwise rename their parent's half-installed staging folder,
-# so callers run pkg_reorder() once at the top level
+# so callers run pkg_reorder_by_load_order() once at the top level
 local function pkg_install(url: String, depth: Integer) -> String:
     if {_depth} > 5:
         pkg_fail("package dependencies nested too deep")
@@ -428,9 +428,10 @@ function pkg_install_report(sender: Object, url: String):
     if {_installed} is not set:
         pkg_msg({_sender}, pkg_error() ? "install failed")
         stop
-    pkg_reorder()
-    if pkg_disabled({_installed}) is true:
-        pkg_msg({_sender}, "installed %{_installed}% disabled, missing: %pkg_missing(pkg_resolve({_installed}))%")
+    pkg_reorder_by_load_order()
+    set {_disabled} to pkg_disabled_dir({_installed})
+    if dir_exists({_disabled}) is true:
+        pkg_msg({_sender}, "installed %{_installed}% disabled, missing: %pkg_missing({_disabled})%")
         pkg_msg({_sender}, "resolve the requirements, then run /package enable %{_installed}%")
         stop
     pkg_msg({_sender}, "installed %{_installed}% - /sk reload scripts to apply")
@@ -438,7 +439,7 @@ function pkg_install_report(sender: Object, url: String):
 # re-downloads a package from its recorded origin and replaces the
 # installed copy unless it already carries the newest version. returns a
 # status message, or nothing with the reason readable via pkg_error().
-# the new copy lands unprefixed; callers run pkg_reorder() afterwards
+# the new copy lands unprefixed; callers run pkg_reorder_by_load_order() afterwards
 local function pkg_update(name: String) -> String:
     set {_dir} to pkg_resolve({_name})
     if {_dir} is not set:
@@ -490,14 +491,13 @@ local function pkg_bare(folder: String) -> String:
         set {_folder} to sub({_folder}, 2)
     return last element of (split {_folder} at "~")
 
-local function pkg_disabled(name: String) -> Boolean:
-    return whether pkg_resolve({_name}) is pkg_disabled_dir({_name})
-
+# bare names of the enabled packages, the ones that get a load-order prefix
 local function pkg_enabled_names() -> Strings:
     set {_folders::*} to (pkg_list() where [input does not start with "-"])
     return ({_folders::*} transformed with [pkg_bare(input)])
 
-# a dependency entry (url or bare name) as an installed package's bare name
+# a dependency entry (url or bare name) as an installed package's name
+# (an origin match comes back as its folder name, see pkg_by_origin)
 local function pkg_dep_name(entry: String) -> String:
     set {_entry} to (trim({_entry}) ? "")
     if {_entry} contains "://":
@@ -509,14 +509,14 @@ local function pkg_dep_name(entry: String) -> String:
         stop
     return {_dep}
 
-local function pkg_deps(name: String) -> Strings:
+local function pkg_dep_names(name: String) -> Strings:
     set {_entries::*} to split (manifest(pkg_resolve({_name}), "packages") ? "") at ","
-    return ({_entries::*} transformed with [pkg_dep_name(input)])
+    return ({_entries::*} transformed with [pkg_bare(pkg_dep_name(input))])
 
 # ready when no dependency is still waiting to be placed. deps that are
 # disabled, missing or self-referencing don't block
-local function pkg_ready(name: String, pending: Strings) -> Boolean:
-    for {_dep} in pkg_deps({_name}):
+local function pkg_has_pending_deps(name: String, pending: Strings) -> Boolean:
+    for {_dep} in pkg_dep_names({_name}):
         if all:
             {_dep} is not {_name}
             {_pending::*} contains {_dep}
@@ -524,31 +524,35 @@ local function pkg_ready(name: String, pending: Strings) -> Boolean:
             return false
     return true
 
-local function pkg_prefix(layer: Integer) -> String:
+# two-digit folder prefix for a load-order layer: 1 -> 01
+local function pkg_layer_prefix(layer: Integer) -> String:
     set {_text} to "%{_layer}%"
     while length of {_text} < 2:
         set {_text} to "0%{_text}%"
     return {_text}
 
-local function pkg_place(name: String, layer: Integer):
+# renames one package folder to <layer>~<name>
+local function pkg_set_load_order(name: String, layer: Integer):
     set {_current} to pkg_resolve({_name})
-    set {_target} to pkg_dir("%pkg_prefix({_layer})%~%{_name}%")
+    set {_target} to pkg_dir("%pkg_layer_prefix({_layer})%~%{_name}%")
     if {_current} is not {_target}:
         dir_rename({_current}, {_target})
 
-# each pass places every package whose deps are already placed, and all of
-# them share that pass's number. a pass that places nothing means a cycle:
-# the remaining packages are reported and share the last layer
-local function pkg_reorder():
+# Skript loads folders in name order, so enabled packages are renamed to
+# NN~name with dependencies in earlier layers. each pass places every package
+# whose deps are already placed, and all of them share that pass's number. a
+# pass that places nothing means a cycle: the remaining packages are reported
+# and share the last layer
+local function pkg_reorder_by_load_order():
     set {_pending::*} to pkg_enabled_names()
     set {_layer} to 1
     while {_pending::*} is set:
-        set {_batch::*} to ({_pending::*} where [pkg_ready(input, {_pending::*}) is true])
+        set {_batch::*} to ({_pending::*} where [pkg_has_pending_deps(input, {_pending::*}) is true])
         if {_batch::*} is not set:
             pkg_msg(console, "circular package dependencies among: %{_pending::*}%")
             set {_batch::*} to {_pending::*}
         loop {_batch::*}:
-            pkg_place(loop-value, {_layer})
+            pkg_set_load_order(loop-value, {_layer})
         remove {_batch::*} from {_pending::*}
         add 1 to {_layer}
 
@@ -725,7 +729,7 @@ command /package [<effect: text>] [<pkg: text>]:
             pkg_selfupdate(sender)
             stop
         if {_effect} is "reorder":
-            pkg_reorder()
+            pkg_reorder_by_load_order()
             pkg_msg(sender, "packages ordered by dependencies - /sk reload scripts to apply")
             stop
         set {_name} to pkg_name({_pkg} ? "")
@@ -738,7 +742,7 @@ command /package [<effect: text>] [<pkg: text>]:
         else if {_effect} is "update":
             pkg_msg(sender, "updating %{_name}% from its origin...")
             set {_status} to pkg_update({_name})
-            pkg_reorder()
+            pkg_reorder_by_load_order()
             pkg_msg(sender, {_status} ? pkg_error() ? "update failed")
             stop
         else if {_effect} is "remove":
@@ -762,7 +766,7 @@ command /package [<effect: text>] [<pkg: text>]:
                 pkg_msg(sender, "cannot enable %{_name}%, missing: %{_missing::*}%")
                 stop
             dir_rename({_from}, pkg_dir({_name}))
-            pkg_reorder()
+            pkg_reorder_by_load_order()
             pkg_msg(sender, "enabled %{_name}% - /sk reload scripts to apply")
             stop
         else if {_effect} is "disable":
