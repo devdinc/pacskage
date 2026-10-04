@@ -486,24 +486,24 @@ local function pkg_update(name: String) -> String:
 
 # folder name without the leading disabled marker and numeric reorder prefixes
 local function pkg_bare(folder: String) -> String:
-    set {_f} to {_folder}
-    if {_f} starts with "-":
-        set {_f} to sub({_f}, 2)
-    if {_f} contains "~":
-        set {_index} to first index of "~" in {_f}
+    if {_folder} starts with "-":
+        set {_folder} to sub({_folder}, 2)
+    if {_folder} contains "~":
+        set {_index} to first index of "~" in {_folder}
         if {_index} > 0:
-            set {_f} to sub({_f}, {_index} + 1)
-    return {_f}
+            set {_folder} to sub({_folder}, {_index} + 1)
+    return {_folder}
 
-# runs the optional load-order package, which ships as its own package. it is
-# not a dependency of pacskage, so its function is only referenced by name at
-# runtime via script reflection
-local function pkg_load_order(sender: Object):
-    set {_run} to function named "pacskage_load_order"
-    if {_run} is not set:
-        set {_url} to "https://github.com/devdinc/pacskage-load-order"
-        pkg_msg({_sender}, "the load-order package is not installed")
+local function pkg_require(sender: Object, func_name: String, display_name: String, url: String) -> Object:
+    set {_fn} to function named {_func_name}
+    if {_fn} is not set:
+        pkg_msg({_sender}, "the %{_display_name}% is not installed")
         pkg_msg({_sender}, "install it with <click:suggest_command:/package install %{_url}%>{@link}<underlined>/package install %{_url}%</underlined></click>")
+    return {_fn}
+
+local function pkg_load_order(sender: Object):
+    set {_run} to pkg_require({_sender}, "pacskage_load_order", "load-order package", "https://github.com/devdinc/pacskage-load-order")
+    if {_run} is not set:
         stop
     run {_run} with arguments {_sender}
 
@@ -585,11 +585,8 @@ local function pkg_name_commands() -> Strings:
 # a dependency of pacskage, so its function is only referenced by name at
 # runtime via script reflection
 local function pkg_browser(sender: Object, page: String):
-    set {_open} to function named "pacskage_browser"
+    set {_open} to pkg_require({_sender}, "pacskage_browser", "package browser", "https://github.com/miberss/pacskage-browser")
     if {_open} is not set:
-        set {_url} to "https://github.com/miberss/pacskage-browser"
-        pkg_msg({_sender}, "the package browser is not installed")
-        pkg_msg({_sender}, "install it with <click:suggest_command:/package install %{_url}%>{@link}<underlined>/package install %{_url}%</underlined></click>")
         stop
     set {_n} to ({_page} parsed as integer) ? 1
     run {_open} with arguments {_sender}, {_n}
