@@ -278,8 +278,6 @@ local function zip_extract_entry(zip: Object, entry: Object, root: Object, optio
 
 local function pkg_find_folder(name: String) -> String:
     return first element of (pkg_list() where [pkg_bare(input) is {_name}])
-        if pkg_bare({_folder}) is {_name}:
-            return {_folder}
 
 # the directory of an installed package, enabled or disabled, or nothing
 local function pkg_resolve(name: String) -> String:
@@ -494,17 +492,11 @@ local function pkg_bare(folder: String) -> String:
             set {_folder} to sub({_folder}, {_index} + 1)
     return {_folder}
 
-local function pkg_require(sender: Object, func_name: String, display_name: String, url: String) -> Object:
-    set {_fn} to function named {_func_name}
-    if {_fn} is not set:
-        pkg_msg({_sender}, "the %{_display_name}% is not installed")
-        pkg_msg({_sender}, "install it with <click:suggest_command:/package install %{_url}%>{@link}<underlined>/package install %{_url}%</underlined></click>")
-    return {_fn}
-
 local function pkg_reorder(sender: Object):
-    set {_run} to pkg_require({_sender}, "pacskage_load_order", "load-order package", "https://github.com/devdinc/pacskage-load-order")
+    set {_run} to function named "pacskage_load_order"
     if {_run} is not set:
         stop
+    pkg_msg(sender, "triggering a reorder")
     run {_run} with arguments {_sender}
 
 # one status line per installed package: flags enabled packages whose
@@ -571,7 +563,7 @@ local function pkg_tab_filter(options: Strings, partial: String) -> Strings:
     return ({_options::*} where [input starts with {_partial}])
 
 local function pkg_commands() -> Strings:
-    return "install <git url>[@version]", "update <name>", "remove <name>", "enable <name>", "disable <name>", "info <name>", "list", "check", "outdated", "browser", "reorder", "selfupdate" and "awesome"
+    return "install <git url>[@version]", "update <name>", "remove <name>", "enable <name>", "disable <name>", "info <name>", "list", "check", "outdated", "browser", "selfupdate" and "awesome"
 
 # just the subcommand keywords (the first word of each entry)
 local function pkg_command_names() -> Strings:
@@ -585,11 +577,14 @@ local function pkg_name_commands() -> Strings:
 # a dependency of pacskage, so its function is only referenced by name at
 # runtime via script reflection
 local function pkg_browser(sender: Object, page: String):
-    set {_open} to pkg_require({_sender}, "pacskage_browser", "package browser", "https://github.com/miberss/pacskage-browser")
-    if {_open} is not set:
-        stop
-    set {_n} to ({_page} parsed as integer) ? 1
-    run {_open} with arguments {_sender}, {_n}
+    set {_open} to function named "pacskage_browser"
+    if {_open} is not set:
+        set {_url} to "https://github.com/miberss/pacskage-browser"
+        pkg_msg({_sender}, "the package browser is not installed")
+        pkg_msg({_sender}, "install it with <click:suggest_command:/package install %{_url}%>{@link}<underlined>/package install %{_url}%</underlined></click>")
+        stop
+    set {_n} to ({_page} parsed as integer) ? 1
+    run {_open} with arguments {_sender}, {_n}
 
 # overwrites the running package.sk with the latest from the repo. the path is
 # fixed: pacskage always lives as package.sk at the scripts root
@@ -671,6 +666,7 @@ command /package [<effect: text>] [<pkg: text>]:
             pkg_msg(sender, "checking %size of {_folders::*}% package(s) for updates...")
             for {_folder} in {_folders::*}:
                 pkg_msg(sender, pkg_outdated_line({_folder}))
+            pkg_reorder(sender)
             stop
         if {_effect} is "awesome":
             set {_link} to pkg_link("awesome-pacskage", "https://github.com/miberss/awesome-pacskage")
@@ -683,20 +679,19 @@ command /package [<effect: text>] [<pkg: text>]:
         if {_effect} is "selfupdate":
             pkg_selfupdate(sender)
             stop
-        if {_effect} is "reorder":
-            pkg_load_order(sender)
-            stop
         set {_name} to pkg_name({_pkg} ? "")
         if {_name} is not set:
             pkg_usage(sender)
             stop
         if {_effect} is "install":
             pkg_install_report(sender, {_pkg})
+            pkg_reorder(sender)
             stop
         else if {_effect} is "update":
             pkg_msg(sender, "updating %{_name}% from its origin...")
             set {_status} to pkg_update({_name})
             pkg_msg(sender, {_status} ? pkg_error() ? "update failed")
+            pkg_reorder(sender)
             stop
         else if {_effect} is "remove":
             set {_dest} to pkg_resolve({_name})
@@ -704,6 +699,7 @@ command /package [<effect: text>] [<pkg: text>]:
                 pkg_msg(sender, "package %{_name}% is not installed")
                 stop
             dir_delete({_dest})
+            pkg_reorder(sender)
             pkg_msg(sender, "removed %{_name}% - /sk reload scripts to apply")
             stop
         else if {_effect} is "enable":
@@ -719,6 +715,7 @@ command /package [<effect: text>] [<pkg: text>]:
                 pkg_msg(sender, "cannot enable %{_name}%, missing: %{_missing::*}%")
                 stop
             dir_rename(pkg_dir({_folder}), pkg_dir(sub({_folder}, 2)))
+            pkg_reorder(sender)
             pkg_msg(sender, "enabled %{_name}% - /sk reload scripts to apply")
             stop
         else if {_effect} is "disable":
@@ -730,6 +727,7 @@ command /package [<effect: text>] [<pkg: text>]:
                 pkg_msg(sender, "package %{_name}% is not installed")
                 stop
             dir_rename(pkg_dir({_folder}), pkg_disabled_dir({_folder}))
+            pkg_reorder(sender)
             pkg_msg(sender, "disabled %{_name}% - /sk reload scripts to apply")
             stop
         else if {_effect} is "info":
