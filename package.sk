@@ -277,7 +277,7 @@ local function zip_extract_entry(zip: Object, entry: Object, root: Object, optio
     Files.write({_target}, {_zip}.readAllBytes(), {_options})
 
 local function pkg_find_folder(name: String) -> String:
-    for {_folder} in pkg_list():
+    return first element of (pkg_list() where [pkg_bare(input) is {_name}])
         if pkg_bare({_folder}) is {_name}:
             return {_folder}
 
