@@ -609,8 +609,15 @@ on TabCompleteEvent:
         stop
     set {_rest} to sub({_buffer}, 9)
     set {_list} to new ArrayList()
-    for {_completion} in pkg_tab({_rest} ? ""):
-        {_list}.add({_completion})
+    if {_rest} contains " ":
+        set {_sub} to first_word({_rest})
+        # Prepend "<subcommand> " to each completion candidate returned by pkg_tab
+        for {_completion} in pkg_tab({_rest} ? ""):
+            {_list}.add("%{_sub}% %{_completion}%")
+    else:
+        # Standard subcommand completion (e.g., /package in<TAB>)
+        for {_completion} in pkg_tab({_rest} ? ""):
+            {_list}.add({_completion})
     event.setCompletions({_list})
 
 command /package [<effect: text>] [<pkg: text>]:
