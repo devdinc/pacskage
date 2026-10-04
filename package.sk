@@ -501,7 +501,7 @@ local function pkg_require(sender: Object, func_name: String, display_name: Stri
         pkg_msg({_sender}, "install it with <click:suggest_command:/package install %{_url}%>{@link}<underlined>/package install %{_url}%</underlined></click>")
     return {_fn}
 
-local function pkg_load_order(sender: Object):
+local function pkg_reorder(sender: Object):
     set {_run} to pkg_require({_sender}, "pacskage_load_order", "load-order package", "https://github.com/devdinc/pacskage-load-order")
     if {_run} is not set:
         stop
