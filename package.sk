@@ -484,20 +484,14 @@ local function pkg_update(name: String) -> String:
 
 # folder name without the leading disabled marker and numeric reorder prefixes
 local function pkg_bare(folder: String) -> String:
-    if {_folder} starts with "-":
-        set {_folder} to sub({_folder}, 2)
-    if {_folder} contains "~":
-        set {_index} to first index of "~" in {_folder}
-        if {_index} > 0:
-            set {_folder} to sub({_folder}, {_index} + 1)
-    return {_folder}
+    set {_folder} to sub({_folder}, 2) if {_folder} starts with "-"
+    return last element of (split {_folder} at "~")
 
 local function pkg_reorder(sender: Object):
-    set {_run} to function named "pacskage_load_order"
+    set {_run} to function named "pkg_reorder_by_load_order"
     if {_run} is not set:
         stop
-    pkg_msg(sender, "triggering a reorder")
-    run {_run} with arguments {_sender}
+    run {_run} with arguments the current script, {_sender}
 
 # one status line per installed package: flags enabled packages whose
 # requirements have since broken (red), and disabled ones now satisfiable
