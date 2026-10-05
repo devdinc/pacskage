@@ -108,6 +108,7 @@ function pkg_name(url: String) -> String:
         length of {_name} <= 0
         {_name} is "." or ".."
         {_name} starts with "-"
+        {_name} contains "~"
     then:
         stop
     return {_name}
@@ -141,9 +142,10 @@ local function pkg_display(folder: String) -> String:
     set {_suffix} to ""
     if {_version} is set:
         set {_suffix} to " v%{_version}%"
+    set {_name} to pkg_bare({_folder})
     if {_folder} does not start with "-":
-        return "%pkg_link({_folder}, {_origin})%%{_suffix}%"
-    return "%pkg_link(sub({_folder}, 2), {_origin})%%{_suffix}% (disabled)"
+        return "%pkg_link({_name}, {_origin})%%{_suffix}%"
+    return "%pkg_link({_name}, {_origin})%%{_suffix}% (disabled)"
 
 # drops the root folder archives wrap their content in (repo-HEAD/...)
 local function strip_root(path: String) -> String:
@@ -309,12 +311,14 @@ local function zip_extract_entry(zip: Object, entry: Object, root: Object, optio
     Files.createDirectories({_target}.getParent())
     Files.write({_target}, {_zip}.readAllBytes(), {_options})
 
+local function pkg_find_folder(name: String) -> String:
+    return first element of (pkg_list() where [pkg_bare(input) is {_name}])
+
 # the directory of an installed package, enabled or disabled, or nothing
 local function pkg_resolve(name: String) -> String:
-    if dir_exists(pkg_dir({_name})) is true:
-        return pkg_dir({_name})
-    if dir_exists(pkg_disabled_dir({_name})) is true:
-        return pkg_disabled_dir({_name})
+    set {_folder} to pkg_find_folder({_name})
+    if {_folder} is set:
+        return pkg_dir({_folder})
 
 local function pkg_installed(name: String) -> Boolean:
     return whether pkg_resolve({_name}) is set
@@ -513,11 +517,16 @@ local function pkg_update(name: String) -> String:
         return "updated %{_name}%%{_version}% disabled, missing: %pkg_missing(pkg_disabled_dir({_name}))%"
     return "updated %{_name}%%{_version}% - /sk reload scripts to apply"
 
-# folder name without the leading disabled marker
+# folder name without the leading disabled marker and numeric reorder prefixes
 local function pkg_bare(folder: String) -> String:
-    if {_folder} does not start with "-":
-        return {_folder}
-    return sub({_folder}, 2)
+    set {_folder} to sub({_folder}, 2) if {_folder} starts with "-"
+    return last element of (split {_folder} at "~")
+
+local function pkg_reorder(sender: Object):
+    set {_reorder} to function named "pkg_reorder_by_load_order"
+    if {_reorder} is not set:
+        stop
+    run {_reorder} with arguments the current script, {_sender}
 
 # one status line per installed package: flags enabled packages whose
 # requirements have since broken (red), and disabled ones now satisfiable
@@ -704,11 +713,13 @@ command /package [<effect: text>] [<pkg: text>]:
             stop
         if {_effect} is "install":
             pkg_install_report(sender, {_pkg})
+            pkg_reorder(sender)
             stop
         else if {_effect} is "update":
             pkg_msg(sender, "updating %{_name}% from its origin...")
             set {_status} to pkg_update({_name})
             pkg_msg(sender, {_status} ? pkg_error() ? "update failed")
+            pkg_reorder(sender)
             stop
         else if {_effect} is "remove":
             set {_dest} to pkg_resolve({_name})
@@ -717,31 +728,35 @@ command /package [<effect: text>] [<pkg: text>]:
                 stop
             dir_delete({_dest})
             pkg_msg(sender, "removed %{_name}% - /sk reload scripts to apply")
+            pkg_reorder(sender)
             stop
         else if {_effect} is "enable":
-            set {_from} to pkg_disabled_dir({_name})
-            if dir_exists({_from}) = false:
-                if dir_exists(pkg_dir({_name})) is true:
-                    pkg_msg(sender, "package %{_name}% is already enabled")
-                    stop
+            set {_folder} to pkg_find_folder({_name})
+            if {_folder} is not set:
                 pkg_msg(sender, "package %{_name}% is not installed")
                 stop
-            set {_missing::*} to pkg_missing({_from})
+            if {_folder} does not start with "-":
+                pkg_msg(sender, "package %{_name}% is already enabled")
+                stop
+            set {_missing::*} to pkg_missing(pkg_dir({_folder}))
             if {_missing::*} is set:
                 pkg_msg(sender, "cannot enable %{_name}%, missing: %{_missing::*}%")
                 stop
-            dir_rename({_from}, pkg_dir({_name}))
+            dir_rename(pkg_dir({_folder}), pkg_dir(sub({_folder}, 2)))
             pkg_msg(sender, "enabled %{_name}% - /sk reload scripts to apply")
+            pkg_reorder(sender)
             stop
         else if {_effect} is "disable":
-            if dir_exists(pkg_disabled_dir({_name})) is true:
-                pkg_msg(sender, "package %{_name}% is already disabled")
-                stop
-            if dir_exists(pkg_dir({_name})) = false:
+            set {_folder} to pkg_find_folder({_name})
+            if {_folder} is not set:
                 pkg_msg(sender, "package %{_name}% is not installed")
                 stop
-            dir_rename(pkg_dir({_name}), pkg_disabled_dir({_name}))
+            if {_folder} starts with "-":
+                pkg_msg(sender, "package %{_name}% is already disabled")
+                stop
+            dir_rename(pkg_dir({_folder}), pkg_disabled_dir({_folder}))
             pkg_msg(sender, "disabled %{_name}% - /sk reload scripts to apply")
+            pkg_reorder(sender)
             stop
         else if {_effect} is "info":
             set {_dir} to pkg_resolve({_name})
@@ -749,7 +764,7 @@ command /package [<effect: text>] [<pkg: text>]:
                 pkg_msg(sender, "package %{_name}% is not installed")
                 stop
             set {_state} to ""
-            if {_dir} is pkg_disabled_dir({_name}):
+            if pkg_find_folder({_name}) starts with "-":
                 set {_state} to " (disabled)"
             set {_lines::*} to manifest_lines({_dir})
             set {_origin} to manifest_value({_lines::*}, "origin")
