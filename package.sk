@@ -62,7 +62,7 @@ local function pkg_sub(url: String) -> String:
     return {_path}
 
 # the link without its "#subfolder" part
-local function pkg_base(url: String) -> String:
+local function pkg_url_base(url: String) -> String:
     return first element of (split {_url} at "#")
 
 # an optional @ref pinned to an install link: a tag, branch, or commit to
@@ -70,7 +70,7 @@ local function pkg_base(url: String) -> String:
 # final path segment counts, so a user@host credential earlier in the url is
 # left untouched
 local function pkg_ref(url: String) -> String:
-    set {_url} to pkg_base({_url})
+    set {_url} to pkg_url_base({_url})
     set {_last} to last element of (split {_url} at "/")
     if {_last} does not contain "@":
         stop
@@ -84,7 +84,7 @@ local function pkg_ref(url: String) -> String:
 # packages from the same monorepo stay distinct
 local function repo_url(url: String) -> String:
     set {_sub} to pkg_sub({_url})
-    set {_url} to pkg_base({_url})
+    set {_url} to pkg_url_base({_url})
     set {_ref} to pkg_ref({_url})
     if {_ref} is set:
         set {_url} to the first (length of {_url} - length of {_ref} - 1) characters of {_url}
@@ -116,7 +116,7 @@ function pkg_name(url: String) -> String:
 # turns a repo link into an archive link for its pinned @ref, or the default
 # branch (HEAD) when none is given; direct .zip links pass through unchanged
 local function pkg_zip_url(url: String) -> String:
-    set {_url} to pkg_base({_url})
+    set {_url} to pkg_url_base({_url})
     if {_url} ends with ".zip":
         return {_url}
     set {_ref} to (pkg_ref({_url}) ? "HEAD")
