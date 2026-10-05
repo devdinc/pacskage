@@ -434,8 +434,16 @@ local function pkg_install(url: String, depth: Integer) -> String:
         pkg_fail("download failed for %{_zip}%")
         stop
     set {_dest} to pkg_dir({_name})
+    set {_sub} to pkg_sub({_url})
     dir_create({_dest})
-    zip_extract({_bytes}, {_dest}, pkg_sub({_url}) ? "")
+    zip_extract({_bytes}, {_dest}, {_sub} ? "")
+    if all:
+        {_sub} is set
+        Files.list(Path.of({_dest})).findAny().isPresent() is false
+    then:
+        dir_delete({_dest})
+        pkg_fail("archive does not contain subfolder %{_sub}%")
+        stop
     # the manifest name wins over the url-derived one
     set {_manifest} to manifest({_dest}, "name")
     set {_rename} to pkg_name({_manifest} ? "")
