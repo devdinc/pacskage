@@ -488,9 +488,10 @@ local function pkg_bare(folder: String) -> String:
     return last element of (split {_folder} at "~")
 
 local function pkg_reorder(sender: Object):
-    set {_run} to function named "pkg_reorder_by_load_order"
-    stop if {_run} is not set
-    run {_run} with arguments the current script, {_sender}
+    set {_reorder} to function named "pkg_reorder_by_load_order"
+    if {_reorder} is not set:
+        stop
+    run {_reorder} with arguments the current script, {_sender}
 
 # one status line per installed package: flags enabled packages whose
 # requirements have since broken (red), and disabled ones now satisfiable
@@ -712,11 +713,11 @@ command /package [<effect: text>] [<pkg: text>]:
             stop
         else if {_effect} is "disable":
             set {_folder} to pkg_find_folder({_name})
-            if {_folder} starts with "-":
-                pkg_msg(sender, "package %{_name}% is already disabled")
-                stop
             if {_folder} is not set:
                 pkg_msg(sender, "package %{_name}% is not installed")
+                stop
+            if {_folder} starts with "-":
+                pkg_msg(sender, "package %{_name}% is already disabled")
                 stop
             dir_rename(pkg_dir({_folder}), pkg_disabled_dir({_folder}))
             pkg_msg(sender, "disabled %{_name}% - /sk reload scripts to apply")
@@ -728,7 +729,7 @@ command /package [<effect: text>] [<pkg: text>]:
                 pkg_msg(sender, "package %{_name}% is not installed")
                 stop
             set {_state} to ""
-            if {_dir} is pkg_disabled_dir({_name}):
+            if pkg_find_folder({_name}) starts with "-":
                 set {_state} to " (disabled)"
             set {_lines::*} to manifest_lines({_dir})
             set {_origin} to manifest_value({_lines::*}, "origin")
