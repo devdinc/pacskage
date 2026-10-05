@@ -489,8 +489,7 @@ local function pkg_bare(folder: String) -> String:
 
 local function pkg_reorder(sender: Object):
     set {_run} to function named "pkg_reorder_by_load_order"
-    if {_run} is not set:
-        stop
+    stop if {_run} is not set
     run {_run} with arguments the current script, {_sender}
 
 # one status line per installed package: flags enabled packages whose
@@ -660,7 +659,6 @@ command /package [<effect: text>] [<pkg: text>]:
             pkg_msg(sender, "checking %size of {_folders::*}% package(s) for updates...")
             for {_folder} in {_folders::*}:
                 pkg_msg(sender, pkg_outdated_line({_folder}))
-            pkg_reorder(sender)
             stop
         if {_effect} is "awesome":
             set {_link} to pkg_link("awesome-pacskage", "https://github.com/miberss/awesome-pacskage")
